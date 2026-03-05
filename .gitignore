@@ -3,6 +3,7 @@
 venv/
 __pycache__/
 *.py[cod]
+*$py.class
 
 # Credentials (CRITICAL)
 serviceAccountKey.json
@@ -17,3 +18,7 @@ dist/
 data_storage/
 captured_images/
 temp_labeling/
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,15 @@
+# Required Python packages for Dust Detection on Jetson Nano
+
+# Core Dependencies
+ultralytics       # YOLOv8 support
+supabase          # Database/Storage Sync
+requests          # Usually pulled in, but good to ensure
+psutil            # For monitoring
+
+# Note:
+# 'torch' and 'torchvision' are usually installed manually on Jetson 
+# using NVIDIA's pre-built wheels (https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048)
+# If using a container (e.g. dusty-nv/l4t-ml), they are pre-installed.
+
+# 'opencv-python' is usually pre-installed via apt (python3-opencv) on Jetson.
+# If missing: pip install opencv-python
