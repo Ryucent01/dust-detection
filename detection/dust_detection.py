@@ -11,10 +11,6 @@ from pathlib import Path
 from ultralytics import YOLO
 import numpy as np
 
-# Resolve paths relative to the script location
-SCRIPT_DIR = Path(__file__).parent.absolute()
-ROOT_DIR = SCRIPT_DIR.parent
-
 # Try importing Firebase
 try:
     import firebase_admin
@@ -28,9 +24,10 @@ except ImportError:
 # CONFIGURATION
 # ==========================================
 # IMPORTANT: Ensure your model file is in the same directory or provide full path
-MODEL_PATH = str(ROOT_DIR / "models" / "best_dust.pt")       
+MODEL_PATH = "best_dust.pt"       
 CONFIDENCE_THRESHOLD = 0.03       # Confidence threshold for detection
 IMAGE_SIZE = 1280                  # Inference image size (YOLO default usually 640)
+USE_BASLER_CAMERA = True          # Set to True for Basler GigE Camera
 USE_CSI_CAMERA = False            # Set to True for Jetson CSI Camera (e.g. Raspberry Pi Cam), False for USB Webcam
 CAMERA_INDEX = 0                  # USB Camera index (usually 0 or 1)
 SENSOR_ID = 0                     # CSI Camera sensor ID (usually 0)
@@ -39,9 +36,9 @@ FLIP_METHOD = 0                   # 0=none, 2=180 rotation (adjust if camera is 
 # --- OFFLINE SYNC CONFIG ---
 # --- FIREBASE CONFIG ---
 # Place your 'serviceAccountKey.json' in the project folder
-SERVICE_ACCOUNT_KEY = str(ROOT_DIR / "serviceAccountKey.json")
+SERVICE_ACCOUNT_KEY = "serviceAccountKey.json"
 FIREBASE_STORAGE_BUCKET = "ryucent-rg-dust.firebasestorage.app"
-LOCAL_STORAGE_DIR = str(ROOT_DIR / "data_storage")
+LOCAL_STORAGE_DIR = "data_storage"
 # ==========================================
 
 def gstreamer_pipeline(
@@ -216,7 +213,7 @@ class DustDetector:
 
         # 5. Load Company Logo
         self.logo = None
-        self.logo_path = str(ROOT_DIR / "studio" / "logo.png")
+        self.logo_path = "logo.png"
         if os.path.exists(self.logo_path):
             try:
                 # Load with alpha channel
@@ -293,6 +290,41 @@ class DustDetector:
         """
         Initialize the video capture object based on configuration.
         """
+        self.use_basler = USE_BASLER_CAMERA
+        
+        if self.use_basler:
+            print("[INFO] Attempting to open Basler GigE Camera...")
+            try:
+                from pypylon import pylon
+                self.tl_factory = pylon.TlFactory.GetInstance()
+                devices = self.tl_factory.EnumerateDevices()
+                if len(devices) == 0:
+                    print("[ERROR] No Basler cameras found on the network.")
+                    sys.exit(1)
+                
+                self.camera = pylon.InstantCamera(self.tl_factory.CreateFirstDevice())
+                self.camera.Open()
+                self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly) 
+                
+                self.converter = pylon.ImageFormatConverter()
+                # Check if camera is monochrome or color to set appropriate conversion
+                if self.camera.GetDeviceInfo().GetModelName().find('monochrome') != -1 or \
+                   pylon.IsMono(self.camera.GetNodeMap().GetNode("PixelFormat").GetValue()):
+                    self.converter.OutputPixelFormat = pylon.PixelType_Mono8
+                else:
+                    self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
+                
+                self.converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
+                
+                print(f"[INFO] Basler Camera opened: {self.camera.GetDeviceInfo().GetModelName()}")
+                return
+            except ImportError:
+                print("[ERROR] pypylon is not installed. Run 'pip install pypylon'.")
+                sys.exit(1)
+            except Exception as e:
+                print(f"[ERROR] Could not open Basler camera: {e}")
+                sys.exit(1)
+
         if USE_CSI_CAMERA:
             print("[INFO] Attempting to open CSI Camera via GStreamer...")
             pipeline = gstreamer_pipeline(
@@ -442,11 +474,38 @@ class DustDetector:
                 # LIVE PREVIEW MODE
                 # -------------------
                 if self.is_live:
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        print("[ERROR] Failed to read frame from camera.")
-                        time.sleep(1)
-                        continue
+                    if hasattr(self, 'use_basler') and self.use_basler:
+                        try:
+                            from pypylon import pylon
+                            if self.camera.IsGrabbing():
+                                grabResult = self.camera.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
+                                if grabResult.GrabSucceeded():
+                                    image = self.converter.Convert(grabResult)
+                                    frame = image.GetArray()
+                                    
+                                    # If monochrome, convert to 3-channel BGR for YOLO compatibility
+                                    if len(frame.shape) == 2:
+                                        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                                        
+                                    grabResult.Release()
+                                else:
+                                    print(f"[ERROR] Grab failed: {grabResult.ErrorCode} {grabResult.ErrorDescription}")
+                                    grabResult.Release()
+                                    continue
+                            else:
+                                print("[ERROR] Basler camera is not grabbing.")
+                                time.sleep(1)
+                                continue
+                        except Exception as e:
+                            print(f"[ERROR] Basler capture error: {e}")
+                            time.sleep(1)
+                            continue
+                    else:
+                        ret, frame = self.cap.read()
+                        if not ret:
+                            print("[ERROR] Failed to read frame from camera.")
+                            time.sleep(1)
+                            continue
                     
                     self.last_frame = frame.copy()
                     display_image = frame
@@ -516,8 +575,13 @@ class DustDetector:
         """
         Release camera resources and close windows.
         """
-        if self.cap and self.cap.isOpened():
-            self.cap.release()
+        if hasattr(self, 'use_basler') and self.use_basler:
+            if hasattr(self, 'camera') and self.camera.IsOpen():
+                self.camera.StopGrabbing()
+                self.camera.Close()
+        else:
+            if self.cap and self.cap.isOpened():
+                self.cap.release()
         cv2.destroyAllWindows()
         print("[INFO] Cleanup complete. Goodbye!")
 
