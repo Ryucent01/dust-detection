@@ -14,3 +14,4 @@ psutil            # For monitoring
 # Firebase Support
 # Professional Dashboard UI
 PySide6
+pypylon
