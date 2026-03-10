@@ -308,8 +308,9 @@ class DustDetector:
                 
                 self.converter = pylon.ImageFormatConverter()
                 # Check if camera is monochrome or color to set appropriate conversion
-                if self.camera.GetDeviceInfo().GetModelName().find('monochrome') != -1 or \
-                   pylon.IsMono(self.camera.GetNodeMap().GetNode("PixelFormat").GetValue()):
+                pixel_format = self.camera.PixelFormat.GetValue()
+                if "mono" in self.camera.GetDeviceInfo().GetModelName().lower() or \
+                   pixel_format.startswith("Mono"):
                     self.converter.OutputPixelFormat = pylon.PixelType_Mono8
                 else:
                     self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
