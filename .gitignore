@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Project specific
+data_storage/
+captured_images/
+best_dust.pt  # Too large for GitHub (unless using LFS)
+
+# IDE
+.vscode/
+.idea/
